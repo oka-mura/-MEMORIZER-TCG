@@ -1,0 +1,1282 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>英単語モンスターTCG - Ver 6.8 Stable</title>
+    <style>
+        :root { --cell-size: 45px; --p-color: #3498db; --e-color: #e74c3c; }
+        @media (min-width: 400px) { :root { --cell-size: 55px; } }
+        body { font-family: sans-serif; margin: 0; background: #1a1a2e; color: white; display: flex; flex-direction: column; align-items: center; user-select: none; touch-action: none; overflow: hidden; }
+        
+        #flash-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: red; opacity: 0; pointer-events: none; z-index: 9999; transition: opacity 0.1s; }
+        
+        #result-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 30000; justify-content: center; align-items: center;
+            flex-direction: column; text-align: center;
+            backdrop-filter: blur(8px); animation: fadeIn 0.5s forwards;
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        .result-title { font-size: 60px; font-weight: 900; font-style: italic; letter-spacing: 5px; margin-bottom: 10px; text-shadow: 0 0 20px rgba(255,255,255,0.5); }
+        .win-theme { background: radial-gradient(circle, rgba(41,128,185,0.9) 0%, rgba(26,37,47,0.95) 100%); color: #f1c40f; }
+        .lose-theme { background: radial-gradient(circle, rgba(192,57,43,0.9) 0%, rgba(26,37,47,0.95) 100%); color: #ecf0f1; }
+        .draw-theme { background: radial-gradient(circle, rgba(127,140,141,0.9) 0%, rgba(44,62,80,0.95) 100%); color: #ecf0f1; }
+        
+        .rematch-btn {
+            padding: 15px 50px; font-size: 20px; font-weight: bold; color: white;
+            background: #2ecc71; border: none; border-radius: 50px;
+            cursor: pointer; box-shadow: 0 5px 0 #27ae60; transition: transform 0.1s;
+        }
+
+        #board { display: grid; grid-template-columns: repeat(7, var(--cell-size)); grid-template-rows: repeat(7, var(--cell-size)); gap: 2px; background: #2c3e50; border: 4px solid #16213e; box-shadow: 0 0 30px rgba(0,0,0,0.7); position: relative; }
+        .cell { width: var(--cell-size); height: var(--cell-size); background: rgba(236, 240, 241, 0.9); display: flex; justify-content: center; align-items: center; position: relative; transition: background 0.3s; }
+        .cell.player-area { background: #e3f2fd; }
+        .cell.enemy-area { background: #fdecea; }
+        .cell.observed-zone { background: #95a5a6 !important; box-shadow: inset 0 0 10px #2c3e50; }
+        .cell.observed-zone::after { content: '×'; position: absolute; font-size: 30px; color: rgba(44, 62, 80, 0.3); pointer-events: none; }
+
+        .piece { width: 90%; height: 90%; border-radius: 4px; display: flex; flex-direction: column; justify-content: center; align-items: center; position: relative; font-weight: bold; font-size: 8px; color: white; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; z-index: 2; }
+        .piece.player { background: linear-gradient(135deg, #3498db, #2980b9); box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
+        .piece.enemy { background: linear-gradient(135deg, #e74c3c, #c0392b); transform: rotate(180deg); box-shadow: 0 -2px 5px rgba(0,0,0,0.3); }
+        .piece.king { border: 2px solid gold; background: linear-gradient(135deg, #8e44ad, #6c3483); box-shadow: 0 0 10px gold; }
+        .piece.immobilized { filter: grayscale(100%); opacity: 0.7; }
+        
+        .piece.selected { animation: selected-float 1.5s infinite ease-in-out; z-index: 20; }
+        @keyframes selected-float { 0% { transform: translateY(0) scale(1.1); box-shadow: 0 0 10px #fff; } 50% { transform: translateY(-5px) scale(1.15); box-shadow: 0 0 20px #fff; } 100% { transform: translateY(0) scale(1.1); box-shadow: 0 0 10px #fff; } }
+
+        .piece-clone { position: fixed; pointer-events: none; z-index: 9999; transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); box-shadow: 0 15px 30px rgba(0,0,0,0.5); border-radius: 4px; }
+
+        @keyframes soft-blink { 0% { box-shadow: 0 0 5px #ff4757; border-color: rgba(255, 71, 87, 0.6); } 50% { box-shadow: 0 0 15px #ff4757; border-color: rgba(255, 71, 87, 1); } 100% { box-shadow: 0 0 5px #ff4757; border-color: rgba(255, 71, 87, 0.6); } }
+        .piece.ability-used-border { border: 3px solid #ff4757; animation: soft-blink 2s infinite ease-in-out; z-index: 10; }
+        .piece.last-moved { outline: 3px solid #f1c40f; box-shadow: 0 0 15px #f1c40f; z-index: 9; }
+        
+        .item-badge { position: absolute; bottom: -2px; right: -2px; font-size: 8px; background: #2ecc71; border-radius: 50%; width: 12px; height: 12px; display: flex; justify-content: center; align-items: center; color: black; z-index: 5; }
+
+        .hand-card.returned-flash {
+            border: 2px solid #ff4757 !important;
+            animation: soft-blink 2s infinite ease-in-out;
+            background: #2c3e50;
+        }
+
+        .popup-text { position: absolute; font-weight: bold; color: #f1c40f; font-size: 14px; text-shadow: 2px 2px 0 #000; pointer-events: none; z-index: 1000; animation: popup-anim 1s forwards; }
+        @keyframes popup-anim { 0% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(-40px); opacity: 0; } }
+        #banner-overlay { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 20000; pointer-events: none; }
+        .battle-banner { font-size: 48px; font-style: italic; font-weight: 900; color: #f1c40f; text-shadow: 0 0 20px rgba(241,196,15,0.8); letter-spacing: 5px; white-space: nowrap; animation: banner-in 0.8s cubic-bezier(0.17, 0.89, 0.32, 1.27) forwards; }
+        @keyframes banner-in { 0% { transform: scale(0.5); opacity: 0; } 70% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+        
+        #cutin-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 10000; justify-content: center; align-items: center; pointer-events: none; }
+        .cutin-bar { width: 100%; height: 100px; background: rgba(0,0,0,0.7); display: flex; flex-direction: column; justify-content: center; align-items: center; border-top: 3px solid #f1c40f; border-bottom: 3px solid #f1c40f; opacity: 0; transform: scaleY(0); animation: cutin-stay-anim 1.2s ease-in-out forwards; }
+        .cutin-name { font-size: 28px; font-weight: bold; color: white; text-shadow: 0 0 10px rgba(255,255,255,0.5); letter-spacing: 3px; margin-bottom: 5px; }
+        .cutin-meaning { font-size: 16px; color: #f1c40f; font-weight: bold; }
+        @keyframes cutin-stay-anim { 0% { opacity: 0; transform: scaleY(0); } 15% { opacity: 1; transform: scaleY(1); } 85% { opacity: 1; transform: scaleY(1); } 100% { opacity: 0; transform: scaleY(0); } }
+        
+        #preview-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 40000; justify-content: center; align-items: center; flex-direction: column; }
+        #preview-overlay img { max-width: 85%; max-height: 80%; border: 2px solid white; border-radius: 10px; animation: img-in 0.2s ease-out; margin-bottom: 10px; }
+        #preview-toggle-btn { display: none; padding: 10px 20px; background: #3498db; color: white; border: 2px solid white; border-radius: 20px; font-weight: bold; cursor: pointer; z-index: 15001; animation: fadeIn 0.3s; }
+        #preview-close-area { position: absolute; top: 20px; right: 20px; width: 50px; height: 50px; font-size: 35px; color: white; font-weight: bold; display: flex; justify-content: center; align-items: center; background: rgba(231, 76, 60, 0.8); border-radius: 50%; cursor: pointer; z-index: 40002; box-shadow: 0 0 10px rgba(0,0,0,0.5); }
+
+        #counter-overlay { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80%; background: rgba(0, 0, 0, 0.95); padding: 20px; border-radius: 10px; border: 2px solid #e74c3c; z-index: 25000; text-align: center; flex-direction: column; align-items: center; box-shadow: 0 0 20px #e74c3c; }
+        .counter-msg { font-size: 18px; margin-bottom: 15px; color: white; }
+        .counter-card { font-size: 24px; color: #f1c40f; font-weight: bold; margin-bottom: 5px; }
+        .counter-effect-name { font-size: 16px; color: #2ecc71; font-weight: bold; margin-bottom: 20px; min-height: 20px; white-space: pre-line; }
+        .counter-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+        .yes-btn { background: #e74c3c; color: white; padding: 10px 25px; border-radius: 5px; border: none; font-weight: bold; font-size: 16px; margin: 5px; cursor: pointer; }
+        .no-btn { background: #95a5a6; color: white; padding: 10px 25px; border-radius: 5px; border: none; font-weight: bold; font-size: 16px; margin: 5px; cursor: pointer; }
+        .view-card-btn { background: #3498db; color: white; padding: 10px 25px; border-radius: 5px; border: none; font-weight: bold; font-size: 16px; margin: 5px; cursor: pointer; }
+
+        /* Tutorial & Help Styles */
+        #help-btn { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border-radius: 50%; background: #34495e; border: 2px solid #95a5a6; color: white; font-weight: bold; display: flex; justify-content: center; align-items: center; cursor: pointer; z-index: 29000; font-size: 18px; }
+        
+        #tutorial-confirm-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 35000; justify-content: center; align-items: center; flex-direction: column; }
+        .confirm-box { background: #2c3e50; padding: 30px; border-radius: 15px; border: 2px solid #f1c40f; text-align: center; box-shadow: 0 0 20px rgba(0,0,0,0.8); width: 80%; max-width: 400px; }
+        .confirm-title { font-size: 20px; font-weight: bold; color: #f1c40f; margin-bottom: 20px; white-space: pre-line; }
+        .confirm-btns { display: flex; gap: 15px; justify-content: center; }
+        .tut-btn { padding: 10px 25px; border: none; border-radius: 25px; font-weight: bold; cursor: pointer; color: white; font-size: 14px; }
+        .btn-yes { background: #3498db; }
+        .btn-no { background: #7f8c8d; }
+
+        #tutorial-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 36000; justify-content: center; align-items: center; flex-direction: column; }
+        .tutorial-content { position: relative; width: 90%; max-width: 400px; height: 80%; display: flex; justify-content: center; align-items: center; }
+        #tutorial-img { max-width: 100%; max-height: 100%; border: 2px solid #3498db; border-radius: 10px; box-shadow: 0 0 15px rgba(52, 152, 219, 0.5); }
+        .nav-btn { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,0.2); color: white; border: none; width: 40px; height: 60px; font-size: 24px; cursor: pointer; border-radius: 5px; display: flex; justify-content: center; align-items: center; z-index: 37000; }
+        .nav-btn:hover { background: rgba(255,255,255,0.4); }
+        .nav-left { left: -10px; }
+        .nav-right { right: -10px; }
+        .tut-close-btn { position: absolute; top: -40px; right: 0; font-size: 30px; color: white; cursor: pointer; font-weight: bold; z-index: 37000; }
+
+        .slash { position: absolute; width: 100%; height: 4px; background: white; z-index: 100; transform: rotate(45deg); pointer-events: none; animation: slash-anim 0.3s forwards; }
+        @keyframes slash-anim { 0% { width: 0; opacity: 1; } 100% { width: 140%; opacity: 0; } }
+        .shake { animation: shake-anim 0.3s; }
+        @keyframes shake-anim { 0%, 100% { transform: translate(0,0); } 20% { transform: translate(-5px, 5px); } 40% { transform: translate(-5px, -5px); } 60% { transform: translate(5px, 5px); } 80% { transform: translate(5px, -5px); } }
+        .movable { background: #abebc6 !important; }
+        .attackable { background: #f1948a !important; }
+        .skill-target { background: #f1c40f !important; animation: blink 1s infinite; }
+        @keyframes spawn { 0% { transform: scale(0); opacity: 0; } 60% { transform: scale(1.2); } 100% { transform: scale(1); opacity: 1; } }
+        .spawn-anim { animation: spawn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+
+        #hand-area { display: flex; gap: 8px; padding: 10px; overflow-x: auto; width: 95%; background: rgba(52, 73, 94, 0.8); border-radius: 10px; margin-top: 10px; min-height: 50px; }
+        .hand-card { min-width: 65px; padding: 12px 5px; background: #2c3e50; border: 2px solid #bdc3c7; border-radius: 6px; text-align: center; font-size: 10px; font-weight: bold; position: relative; transition: transform 0.1s; }
+        .selected-card { border-color: #2ecc71; background: #1e8449; transform: translateY(-3px); }
+        
+        #ui-panel { height: 110px; text-align: center; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }
+        #msg-box { color: #f1c40f; margin: 5px; font-size: 14px; height: 20px; transition: opacity 0.5s; width: 100%; }
+        
+        .action-btn { padding: 8px 16px; background: #f1c40f; border: none; border-radius: 20px; font-weight: bold; cursor: pointer; margin: 2px; box-shadow: 0 3px 0 #b7950b; font-size: 11px; }
+        .action-btn:active { transform: translateY(2px); box-shadow: none; }
+        .action-btn:disabled { background: #95a5a6; cursor: not-allowed; box-shadow: none; opacity: 0.5; }
+        #support-options { display: none; gap: 10px; margin-top: 5px; }
+
+        #stats-panel { font-size: 11px; margin: 5px; display: flex; gap: 15px; background: rgba(0,0,0,0.3); padding: 8px 15px; border-radius: 20px; color: #ecf0f1; font-weight: bold; }
+    </style>
+</head>
+<body onclick="closePreview()">
+    <div id="flash-overlay"></div>
+    <div id="banner-overlay"><div class="battle-banner" id="banner-text">BATTLE START</div></div>
+    
+    <div id="help-btn" onclick="event.stopPropagation(); showTutorialConfirm(true);">?</div>
+
+    <div id="tutorial-confirm-overlay">
+        <div class="confirm-box">
+            <div class="confirm-title" id="tut-confirm-msg">チュートリアルを見ますか？</div>
+            <div class="confirm-btns">
+                <button class="tut-btn btn-yes" onclick="startTutorial()">見る</button>
+                <button class="tut-btn btn-no" onclick="skipTutorial()">スキップ</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="tutorial-overlay">
+        <div class="tutorial-content">
+            <div class="tut-close-btn" onclick="closeTutorial()">×</div>
+            <button class="nav-btn nav-left" onclick="event.stopPropagation(); changeTutorialImage(-1)">&#10094;</button>
+            <img id="tutorial-img" src="">
+            <button class="nav-btn nav-right" onclick="event.stopPropagation(); changeTutorialImage(1)">&#10095;</button>
+        </div>
+    </div>
+
+    <div id="result-overlay">
+        <div id="result-title" class="result-title">YOU WIN</div>
+        <div id="result-score" class="result-score">Score</div>
+        <button class="rematch-btn" onclick="init()">REMATCH</button>
+    </div>
+
+    <div id="cutin-overlay"><div id="cutin-bar" class="cutin-bar"><div id="cutin-name" class="cutin-name">DIVIDE</div><div id="cutin-meaning" class="cutin-meaning">ー 分割する ー</div></div></div>
+    
+    <div id="preview-overlay">
+        <div id="preview-close-area" onclick="event.stopPropagation(); closePreview();">×</div>
+        <img id="preview-img" src="">
+        <button id="preview-toggle-btn" onclick="event.stopPropagation(); togglePreviewMode();">前置詞を表示</button>
+    </div>
+
+    <div id="counter-overlay">
+        <div class="counter-msg">相手がカードを使用しました。<br>Opposeの能力で無効化しますか？</div>
+        <div class="counter-card" id="counter-card-name">MUST</div>
+        <div class="counter-effect-name" id="counter-effect-name">（効果名）</div>
+        <div class="counter-btns">
+            <button class="yes-btn" onclick="resolveOpposeAttempt(true)">YES</button>
+            <button class="view-card-btn" onclick="event.stopPropagation(); showOpposePreview()">カードを見る</button>
+            <button class="no-btn" onclick="resolveOpposeAttempt(false)">NO</button>
+        </div>
+    </div>
+
+    <div id="stats-panel"><div>撃破: <span id="kill-p-display" style="color:#3498db">0</span>/3 vs <span id="kill-e-display" style="color:#e74c3c">0</span>/3</div><div>山札: P:<span id="deck-p">0</span> E:<span id="deck-e">0</span></div></div>
+    <div id="board"></div>
+    
+    <div id="ui-panel">
+        <div id="msg-box"></div>
+        <div id="controls-area">
+            <button id="ability-btn" class="action-btn" style="display:none;" onclick="event.stopPropagation(); executeAbility();">能力発動</button>
+            <button id="last-card-btn" class="action-btn" onclick="event.stopPropagation(); showLastEnemyCard();" disabled>LAST CARD</button>
+            <div id="support-options">
+                <button id="opt-a-btn" class="action-btn" onclick="event.stopPropagation(); handleSupportOption(0);"></button>
+                <button id="opt-b-btn" class="action-btn" onclick="event.stopPropagation(); handleSupportOption(1);"></button>
+            </div>
+        </div>
+        <div id="turn-display" style="font-size: 12px; opacity: 0.8; margin-top: 5px;"></div>
+    </div>
+    
+    <div id="hand-area"></div>
+
+    <script>
+        const CARD_DATA = {
+            'Observe': { meaning: '観察する', type: 'monster', skill: 'manual', sym: '∞', img: 'https://i.postimg.cc/0jg9gdx3/observe.png', dirs: [[1,1],[1,-1],[-1,1],[-1,-1]], range: 1 },
+            'Deserve': { meaning: '値する', type: 'monster', skill: 'manual', sym: '★', img: 'https://i.postimg.cc/ZRww9SV0/deserve2.png', dirs: [[1,0],[-1,0],[0,1],[0,-1]], range: 1 },
+            'Expand':  { meaning: '拡張する', type: 'monster', sym: '∞', img: 'https://i.postimg.cc/NfqjZYj7/expand.png', dirs: [[0,1],[0,-1],[-1,0]], range: 1, extraDirs: [[1,0]], extraRange: 2 },
+            'Divide':  { meaning: '分割する', type: 'monster', skill: 'manual', sym: '🔄', img: 'https://i.postimg.cc/Pq3q7wPc/divide.png', dirs: [[1,1],[1,-1],[-1,1],[-1,-1],[0,1],[0,-1]], range: 1 },
+            'Emerge':  { meaning: '出現する', type: 'monster', sym: '⚡', img: 'https://i.postimg.cc/yx5nPTq4/emerge2.png', dirs: [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1]], range: 1 },
+            'Oppose':  { meaning: '反対する', type: 'monster', sym: '', img: 'https://i.postimg.cc/HsqkDmW4/oppose.png', dirs: [[-1,1],[-1,-1]], range: 1, extraDirs: [[1,1],[1,-1]], extraRange: 2 },
+            'Struggle':{ meaning: '奮闘する', type: 'monster', sym: '★', img: 'https://i.postimg.cc/5twG2Thz/strugle2.png', dirs: [[1,0],[1,1],[1,-1]], range: 1 },
+            'KING':    { meaning: '王', type: 'monster', sym: '', dirs: [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]], range: 1, img_p: 'https://i.postimg.cc/y829bttp/KING-blue.png', img_e: 'https://i.postimg.cc/G3M4f6sM/KING-red.png' },
+            'Can': { meaning: '〜できる(可能)', meaningA: '～できる(可能)', meaningB: '～でありうる(可能性)', type: 'support', img: 'https://i.postimg.cc/02MVNhmy/can.png', descA: '2体移動(各1回)', descB: '範囲+1(味方1体)' },
+            'Must': { meaning: '〜に違いない(義務)', meaningA: '～しなければならない(義務)', meaningB: '～に違いない(強い推量)', type: 'support', img: 'https://i.postimg.cc/x1LgvHtB/must.png', descA: '敵1体行動不能', descB: '撃破時得点+2/敵+1' },
+            'Will': { meaning: '〜するぞ(意志)', meaningA: '～するつもりだ(意思)', meaningB: '～だろう(未来)', type: 'support', img: 'https://i.postimg.cc/pTLZMSxZ/will.png', descA: '妨害解除(味方)', descB: '敵能力封印(次T)' },
+            'With': { meaning: '〜と一緒に', type: 'item', img: 'https://i.postimg.cc/JnXb8Cvf/with.png', desc: '装備:隣接時移動+1' },
+            'To': { meaning: '〜の方へ', type: 'item', img: 'https://i.postimg.cc/TY0nf9N8/to.png', desc: '装備:攻撃範囲+1' }
+        };
+
+        const tutorialImages = [
+            'https://i.postimg.cc/h462BbG4/shuo-ming1.png',
+            'https://i.postimg.cc/Nj7Dm3k8/shuo-ming2.png',
+            'https://i.postimg.cc/SKgGtcPB/shuo-ming3.png',
+            'https://i.postimg.cc/v8gv3gvV/shuo-ming4.png',
+            'https://i.postimg.cc/3wxXpdR7/shuo-ming5.png',
+            'https://i.postimg.cc/8Cy8GKsG/shuo-ming5-5.png',
+            'https://i.postimg.cc/NFmmYXN2/shuo-ming6.png',
+            'https://i.postimg.cc/bJTf5VPv/shuo-ming7.png',
+            'https://i.postimg.cc/mZmGNnVp/shuo-ming8.png'
+        ];
+
+        let pieces = {}, pHand = [], pDeck = [], eDeck = [], eHand = [], kills = {p:0, e:0};
+        let turn = 'player', phase = 'setup', selectedPos = null, selectedCardIdx = null, hasActionUsed = false;
+        let abilityMode = null, abilityTargetPos = null, abilityUsedThisTurn = false;
+        let isPreviewing = false; let blockNextTurnAbility = false; lastMovedPos = null; let msgTimer = null;
+        
+        let actionsRemaining = 1;
+        let movedPieces = new Set();
+        let mustScoreEffect = false; 
+        let willBlockEnemyAbility = false;
+        let enemySilenced = false; 
+        let playerIgnoreObserve = false;
+        let enemyIgnoreObserve = false;
+
+        let enemyActionsRemaining = 1;
+        let enemyMovedPieces = new Set();
+        let enemyAbilityUsedThisTurn = false; 
+        let opposeSelectionMode = false;
+        let enemyNextTurnAbilityBlocked = false; 
+
+        let previewMainName = null, previewType = null, previewItems = [], previewIsShowingItem = false;
+        let pendingEnemySupport = null;
+        let pendingEnemyEffectType = null; 
+        let lastEnemyCardName = null;
+        let isOpposePreviewing = false;
+
+        let isAnimating = false; // 新設: アニメーション中フラグ
+
+        let isFirstBoot = true;
+        let currentTutorialIndex = 0;
+        let isMidGameTutorial = false;
+
+        window.onload = function() {
+            showTutorialConfirm(false);
+        };
+
+        function showTutorialConfirm(isMidGame) {
+            isMidGameTutorial = isMidGame;
+            document.getElementById('tut-confirm-msg').innerText = isMidGame ? "チュートリアルを見ますか？" : "英単語モンスターTCGへようこそ！\nチュートリアルを見ますか？";
+            document.getElementById('tutorial-confirm-overlay').style.display = 'flex';
+        }
+
+        function skipTutorial() {
+            document.getElementById('tutorial-confirm-overlay').style.display = 'none';
+            if (!isMidGameTutorial && isFirstBoot) {
+                init();
+                isFirstBoot = false;
+            }
+        }
+
+        function startTutorial() {
+            document.getElementById('tutorial-confirm-overlay').style.display = 'none';
+            currentTutorialIndex = 0;
+            updateTutorialImage();
+            document.getElementById('tutorial-overlay').style.display = 'flex';
+        }
+
+        function closeTutorial() {
+            document.getElementById('tutorial-overlay').style.display = 'none';
+            if (!isMidGameTutorial && isFirstBoot) {
+                init();
+                isFirstBoot = false;
+            }
+        }
+
+        function changeTutorialImage(dir) {
+            let nextIndex = currentTutorialIndex + dir;
+            if (nextIndex >= 0 && nextIndex < tutorialImages.length) {
+                currentTutorialIndex = nextIndex;
+                updateTutorialImage();
+            }
+        }
+
+        function updateTutorialImage() {
+            document.getElementById('tutorial-img').src = tutorialImages[currentTutorialIndex];
+            const isLast = currentTutorialIndex === tutorialImages.length - 1;
+            document.querySelector('.nav-left').style.visibility = currentTutorialIndex === 0 ? 'hidden' : 'visible';
+            document.querySelector('.nav-right').style.visibility = isLast ? 'hidden' : 'visible';
+        }
+
+        function init() {
+            kills = {p:0, e:0}; phase = 'setup'; turn = 'player'; 
+            blockNextTurnAbility = false; lastMovedPos = null;
+            enemySilenced = false; willBlockEnemyAbility = false; mustScoreEffect = false;
+            playerIgnoreObserve = false; enemyIgnoreObserve = false;
+            lastEnemyCardName = null;
+            enemyNextTurnAbilityBlocked = false; 
+            isAnimating = false;
+            document.getElementById('last-card-btn').disabled = true;
+            
+            document.getElementById('result-overlay').style.display = 'none';
+            document.getElementById('counter-overlay').style.display = 'none';
+
+            let monsterCards = [];
+            let supportCards = [];
+
+            Object.keys(CARD_DATA).filter(k=>CARD_DATA[k].type==='monster' && k!=='KING').forEach(n=>{ 
+                monsterCards.push({name:n, id:Math.random(), abilityUsed:false, justActivated:false, resurrectionUsed:false, justReturned:false, items:[]}); 
+                monsterCards.push({name:n, id:Math.random(), abilityUsed:false, justActivated:false, resurrectionUsed:false, justReturned:false, items:[]}); 
+            });
+            ['Can', 'Must', 'Will', 'To', 'With'].forEach(n => {
+                supportCards.push({name:n, id:Math.random(), justReturned:false});
+                supportCards.push({name:n, id:Math.random(), justReturned:false});
+            });
+
+            monsterCards.sort(() => Math.random() - 0.5);
+            supportCards.sort(() => Math.random() - 0.5);
+            pHand = monsterCards.splice(0, 4);
+            pDeck = [...monsterCards, ...supportCards].sort(() => Math.random() - 0.5);
+
+            let eMonsters = [];
+            Object.keys(CARD_DATA).filter(k=>CARD_DATA[k].type==='monster' && k!=='KING').forEach(n=>{ 
+                eMonsters.push({name:n, id:Math.random(), abilityUsed:false, justActivated:false, resurrectionUsed:false, justReturned:false, items:[]}); 
+                eMonsters.push({name:n, id:Math.random(), abilityUsed:false, justActivated:false, resurrectionUsed:false, justReturned:false, items:[]}); 
+            });
+            let eSupports = [];
+            ['Can', 'Must', 'Will', 'To', 'With'].forEach(n => {
+                eSupports.push({name:n, id:Math.random()});
+                eSupports.push({name:n, id:Math.random()});
+            });
+            eDeck = [...eMonsters, ...eSupports].sort(() => Math.random() - 0.5);
+            eHand = [];
+
+            pieces = { '6,3': { name: 'KING', type: 'player', isKing: true, items:[] }, '0,3': { name: 'KING', type: 'enemy', isKing: true, items:[] } };
+            render(); showMsg("【編成】4体を配置せよ", 0);
+        }
+
+        function showResult(result, hideScore = false) {
+            const overlay = document.getElementById('result-overlay');
+            const scoreEl = document.getElementById('result-score');
+            if (result === 'draw') {
+                overlay.className = 'draw-theme';
+                document.getElementById('result-title').innerText = 'DRAW';
+            } else {
+                overlay.className = result ? 'win-theme' : 'lose-theme';
+                document.getElementById('result-title').innerText = result ? 'YOU WIN' : 'YOU LOSE';
+            }
+            if (hideScore) scoreEl.style.display = 'none';
+            else {
+                scoreEl.style.display = 'block';
+                let pDisp = (kills.p > 3) ? 3 : kills.p;
+                let eDisp = (kills.e > 3) ? 3 : kills.e;
+                scoreEl.innerText = `Kills: You ${pDisp} - ${eDisp} Enemy`;
+            }
+            overlay.style.display = 'flex';
+        }
+
+        function showMsg(txt, duration = 2500) { 
+            const box = document.getElementById('msg-box'); box.innerText = txt; box.style.opacity = 1;
+            if (msgTimer) clearTimeout(msgTimer); if (duration > 0) msgTimer = setTimeout(() => { box.style.opacity = 0; }, duration);
+        }
+
+        function animateMove(fromPos, toPos, onComplete) {
+            isAnimating = true; // アニメーション開始
+            const idxs = [fromPos, toPos].map(p => parseInt(p[0])*7 + parseInt(p[2]));
+            const cells = document.querySelectorAll('.cell');
+            const fromCell = cells[idxs[0]], toCell = cells[idxs[1]];
+            const pieceEl = fromCell.querySelector('.piece');
+            if(!pieceEl) { isAnimating = false; onComplete(); return; } // 安全策
+            
+            const isEnemy = pieceEl.classList.contains('enemy'); const rotation = isEnemy ? 'rotate(180deg)' : 'rotate(0deg)';
+            const clone = pieceEl.cloneNode(true); const rect = pieceEl.getBoundingClientRect();
+            clone.classList.add('piece-clone'); clone.style.left = rect.left + 'px'; clone.style.top = rect.top + 'px';
+            clone.style.width = rect.width + 'px'; clone.style.height = rect.height + 'px';
+            clone.style.transform = rotation; 
+            pieceEl.style.opacity = '0'; document.body.appendChild(clone);
+            requestAnimationFrame(() => {
+                const tr = toCell.getBoundingClientRect(); 
+                clone.style.transform = `scale(1.2) ${rotation}`; clone.style.left = tr.left + 'px'; clone.style.top = tr.top + 'px';
+                setTimeout(() => { 
+                    clone.style.transform = `scale(1) ${rotation}`; 
+                    setTimeout(() => { 
+                        pieceEl.style.opacity = '1'; 
+                        clone.remove(); 
+                        isAnimating = false; // アニメーション終了
+                        onComplete(); 
+                    }, 100); 
+                }, 400);
+            });
+        }
+
+        function showBanner(txt) { const overlay = document.getElementById('banner-overlay'); const el = document.getElementById('banner-text'); el.innerText = txt; overlay.style.display = 'block'; setTimeout(() => { overlay.style.display = 'none'; }, 2000); }
+        function createPopup(txt, pos) { const idx = parseInt(pos[0])*7 + parseInt(pos[2]); const cell = document.querySelectorAll('.cell')[idx]; const div = document.createElement('div'); div.className = 'popup-text'; div.innerText = txt; cell.appendChild(div); setTimeout(() => div.remove(), 1000); }
+        function playAttackEffect(pos) { const idx = parseInt(pos[0])*7 + parseInt(pos[2]); const cell = document.querySelectorAll('.cell')[idx]; const slash = document.createElement('div'); slash.className = 'slash'; cell.appendChild(slash); document.getElementById('board').classList.add('shake'); document.getElementById('flash-overlay').style.opacity = 0.3; setTimeout(() => { slash.remove(); document.getElementById('board').classList.remove('shake'); document.getElementById('flash-overlay').style.opacity = 0; }, 300); }
+        
+        function showCutin(cardName, isEnemy = false, specificText = null) { 
+            const overlay = document.getElementById('cutin-overlay'); 
+            const bar = document.getElementById('cutin-bar'); 
+            document.getElementById('cutin-name').innerText = cardName.toUpperCase(); 
+            document.getElementById('cutin-meaning').innerText = `ー ${specificText || CARD_DATA[cardName].meaning} ー`; 
+            bar.style.borderTopColor = bar.style.borderBottomColor = isEnemy ? '#e74c3c' : '#3498db'; 
+            overlay.style.display = 'flex'; 
+            setTimeout(() => { overlay.style.display = 'none'; }, 1200); 
+        }
+        
+        function checkGameEnd() { 
+            if (kills.p >= 3 && kills.e >= 3) { showResult('draw'); return true; }
+            if (kills.p >= 3) { showResult(true); return true; } 
+            if (kills.e >= 3) { showResult(false); return true; } 
+            return false; 
+        }
+
+        function processBattle(attackerPos, targetPos) {
+            const attacker = pieces[attackerPos]; const target = pieces[targetPos];
+            playAttackEffect(targetPos);
+            
+            let points = 1; let enemyPoints = 0;
+            if (attacker.type === 'player' && mustScoreEffect) { points = 2; enemyPoints = 1; createPopup("MUST: HIGH RISK!", targetPos); }
+
+            if (target.isKing) { showResult(attacker.type === 'player', true); return true; }
+            
+            let isSilenced = false;
+            if (target.type === 'enemy') {
+                isSilenced = (enemySilenced || willBlockEnemyAbility);
+            }
+
+            if (target.name === 'Struggle' && !target.resurrectionUsed && !isSilenced) {
+                target.resurrectionUsed = true; showCutin('Struggle', target.type === 'enemy'); createPopup("RETURN!", targetPos);
+                if (target.type === 'player') {
+                    pHand.push({...target, resurrectionUsed:true, abilityUsed:false, justActivated:false, justReturned:true});
+                    blockNextTurnAbility = true; showMsg("Struggle: 手札に帰還 (次能力不可)");
+                } else {
+                    eHand.push({...target, resurrectionUsed:true, abilityUsed:false, justActivated:false}); showMsg("敵Struggle: 敵手札に帰還");
+                    enemyNextTurnAbilityBlocked = true; 
+                }
+                delete pieces[targetPos]; pieces[targetPos] = pieces[attackerPos]; delete pieces[attackerPos];
+            } else {
+                if (attacker.type === 'player') { kills.p += points; if(enemyPoints > 0) kills.e += enemyPoints; createPopup(`+${points} POINT!`, targetPos); } 
+                else { kills.e++; createPopup("LOSE..", targetPos); }
+                delete pieces[targetPos]; pieces[targetPos] = pieces[attackerPos]; delete pieces[attackerPos];
+            }
+            return false;
+        }
+
+        function isSquareSafe(r, c) {
+            for (let k in pieces) {
+                if (pieces[k].type === 'player' && !pieces[k].immobilized) {
+                    const {attacks} = getAvailableActions(k);
+                    if (attacks.includes(`${r},${c}`)) return false;
+                }
+            }
+            return true;
+        }
+
+        function tryEnemyAbilities(onComplete) {
+            if (enemyAbilityUsedThisTurn) {
+                if (onComplete) onComplete();
+                return false;
+            }
+
+            let usedAbility = false;
+
+            if (!usedAbility && !enemySilenced && !willBlockEnemyAbility) {
+                Object.keys(pieces).forEach(pos => {
+                    const p = pieces[pos];
+                    if (p && p.type === 'enemy' && p.name === 'Observe' && !p.abilityUsed) {
+                        const r = parseInt(pos[0]), c = parseInt(pos[2]);
+                        const dirs = [[1,1],[1,-1],[-1,1],[-1,-1]];
+                        let hasTarget = false;
+                        dirs.forEach(([dr, dc]) => {
+                            if (pieces[`${r+dr},${c+dc}`]?.type === 'player') hasTarget = true;
+                        });
+                        if (hasTarget) {
+                            p.abilityUsed = true;
+                            enemyAbilityUsedThisTurn = true;
+                            showCutin('Observe', true);
+                            usedAbility = true;
+                        }
+                    }
+                });
+            }
+
+            if (!usedAbility && !enemySilenced && !willBlockEnemyAbility) {
+                let kingPos = Object.keys(pieces).find(k => pieces[k] && pieces[k].isKing && pieces[k].type === 'enemy');
+                if (kingPos) {
+                    let r = parseInt(kingPos[0]), c = parseInt(kingPos[2]);
+                    if (!isSquareSafe(r, c)) {
+                        let deservePos = Object.keys(pieces).find(k => pieces[k] && pieces[k].name === 'Deserve' && pieces[k].type === 'enemy' && !pieces[k].abilityUsed);
+                        if (deservePos) {
+                            let dr = parseInt(deservePos[0]), dc = parseInt(deservePos[2]);
+                            if (isSquareSafe(dr, dc)) { 
+                                enemyAbilityUsedThisTurn = true;
+                                showCutin('Deserve', true);
+                                setTimeout(() => {
+                                    animateMove(deservePos, kingPos, () => {
+                                        let temp = pieces[kingPos];
+                                        pieces[kingPos] = pieces[deservePos];
+                                        pieces[deservePos] = temp;
+                                        pieces[kingPos].abilityUsed = true; 
+                                        pieces[kingPos].justActivated = true; 
+                                        showMsg("敵Deserve: KING救出");
+                                        render();
+                                        setTimeout(() => { if(onComplete) onComplete(); }, 500); 
+                                    });
+                                }, 1000); 
+                                return true; 
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (onComplete && !usedAbility) onComplete(); 
+            return usedAbility;
+        }
+
+        function decideEnemyIntent(card) {
+            if (card.name === 'Can') return 'A';
+            if (card.name === 'Must') {
+                let targets = Object.keys(pieces).filter(k => pieces[k].type === 'player' && !pieces[k].immobilized);
+                return (targets.length > 0 && Math.random() < 0.6) ? 'A' : 'B';
+            }
+            if (card.name === 'Will') {
+                let pObs = new Set();
+                Object.keys(pieces).forEach(k => {
+                    if (pieces[k].type === 'player' && pieces[k].name === 'Observe' && pieces[k].abilityUsed) {
+                        let r = parseInt(k[0]), c = parseInt(k[2]);
+                        for(let dr=-1; dr<=1; dr++) for(let dc=-1; dc<=1; dc++) {
+                            let nr=r+dr, nc=c+dc; if(nr>=0&&nr<7&&nc>=0&&nc<7) pObs.add(`${nr},${nc}`);
+                        }
+                    }
+                });
+                let trappedInObserve = Object.keys(pieces).some(k => pieces[k].type === 'enemy' && pObs.has(k));
+                let hasDebuffs = Object.values(pieces).some(p => p.type === 'enemy' && p.immobilized) || trappedInObserve;
+                return hasDebuffs ? 'A' : 'B';
+            }
+            return null;
+        }
+
+        function checkOpposeInterrupt(card, onComplete) {
+            pendingEnemySupport = card;
+            pendingEnemyEffectType = decideEnemyIntent(card);
+
+            let opposeUnits = Object.keys(pieces).filter(k => pieces[k].type === 'player' && pieces[k].name === 'Oppose' && !pieces[k].abilityUsed);
+            if (opposeUnits.length === 0) { onComplete(false); return; }
+            
+            document.getElementById('counter-card-name').innerText = card.name;
+            
+            let effectText = "ーーー";
+            if (pendingEnemyEffectType === 'A') effectText = CARD_DATA[card.name].meaningA;
+            else if (pendingEnemyEffectType === 'B') effectText = CARD_DATA[card.name].meaningB;
+            else if (CARD_DATA[card.name].type === 'item') effectText = "ーーー";
+            
+            document.getElementById('counter-effect-name').innerText = effectText;
+            
+            document.getElementById('counter-overlay').style.display = 'flex';
+            toggleHelpBtn(false);
+            window.resumeEnemyAction = onComplete;
+        }
+
+        function showOpposePreview() {
+            if(!pendingEnemySupport) return;
+            isOpposePreviewing = true;
+            document.getElementById('counter-overlay').style.display = 'none';
+            previewMainName = pendingEnemySupport.name;
+            previewType = 'enemy';
+            previewItems = [];
+            previewIsShowingItem = false;
+            updatePreviewImage();
+            document.getElementById('preview-toggle-btn').style.display = 'none'; 
+            document.getElementById('preview-overlay').style.display = 'flex';
+        }
+
+        function resolveOpposeAttempt(doActivate) {
+            document.getElementById('counter-overlay').style.display = 'none';
+            toggleHelpBtn(true);
+            if (!doActivate) { window.resumeEnemyAction(false); return; }
+            let opposeUnits = Object.keys(pieces).filter(k => pieces[k].type === 'player' && pieces[k].name === 'Oppose' && !pieces[k].abilityUsed);
+            if (opposeUnits.length === 1) { activateOppose(opposeUnits[0]); window.resumeEnemyAction(true); } 
+            else { opposeSelectionMode = true; showMsg("無効化に使用するOpposeを選択してください", 0); render(); }
+        }
+
+        function activateOppose(pos) {
+            const p = pieces[pos];
+            p.abilityUsed = true; p.justActivated = true;
+            blockNextTurnAbility = true;
+            showCutin('Oppose'); showMsg("Oppose: 敵能力無効化 (次能力不可)"); render();
+        }
+
+        function endTurn() {
+            if (checkGameEnd()) return; 
+            for(let k in pieces) if(pieces[k].type === 'player') pieces[k].justActivated = false;
+            for(let k in pieces) if(pieces[k].type === 'player') pieces[k].immobilized = false;
+
+            if (willBlockEnemyAbility) enemySilenced = true; else enemySilenced = false;
+            playerIgnoreObserve = false;
+
+            pHand.forEach(c => c.justReturned = false);
+            turn = 'enemy'; abilityUsedThisTurn = false; actionsRemaining = 1; movedPieces.clear(); mustScoreEffect = false;
+            enemyActionsRemaining = 1; enemyMovedPieces.clear();
+            enemyAbilityUsedThisTurn = false; 
+
+            if (enemyNextTurnAbilityBlocked) {
+                enemyAbilityUsedThisTurn = true; 
+                enemyNextTurnAbilityBlocked = false; 
+                showMsg("敵: 能力使用不可 (直前の行動反動)");
+            }
+
+            render();
+            setTimeout(enemyActionPhase, 1000);
+        }
+
+        function enemyActionPhase() {
+            if (checkGameEnd()) return;
+            
+            tryEnemyAbilities(() => {
+                if (enemyAbilityUsedThisTurn) {
+                    setTimeout(enemyMovePhase, 500);
+                    return;
+                }
+
+                if (eDeck.length > 0) eHand.push(eDeck.shift());
+                
+                if (enemySilenced) {
+                    showMsg("敵能力封印中...", 1500);
+                    setTimeout(enemyMovePhase, 1500);
+                    return;
+                }
+
+                const supportIdx = eHand.findIndex(c => CARD_DATA[c.name].type !== 'monster');
+                if (supportIdx !== -1 && Math.random() < 0.5) {
+                    const card = eHand[supportIdx];
+                    if (CARD_DATA[card.name].type === 'item') {
+                        let canEquip = Object.values(pieces).some(p => p.type === 'enemy' && (!p.items || p.items.length === 0));
+                        if (!canEquip) {
+                            eHand.splice(supportIdx, 1); 
+                            setTimeout(enemyMovePhase, 500);
+                            return;
+                        }
+                    }
+
+                    lastEnemyCardName = card.name;
+                    document.getElementById('last-card-btn').disabled = false;
+
+                    checkOpposeInterrupt(card, (interrupted) => {
+                        eHand.splice(supportIdx, 1);
+                        if (!interrupted) { 
+                            let effectType = pendingEnemyEffectType;
+                            let cutinText = null;
+                            
+                            if(effectType === 'A') cutinText = CARD_DATA[card.name].meaningA;
+                            else if(effectType === 'B') cutinText = CARD_DATA[card.name].meaningB;
+                            else if (CARD_DATA[card.name].type === 'item') cutinText = 'ーーー';
+                            
+                            showCutin(card.name, true, cutinText); 
+                            applyEnemySupport(card, effectType);
+                            enemyAbilityUsedThisTurn = true; 
+                        }
+                        setTimeout(enemyMovePhase, 1000);
+                    });
+                } else {
+                    setTimeout(enemyMovePhase, 500);
+                }
+            });
+        }
+
+        function applyEnemySupport(card, effectType) {
+            if (card.name === 'Can') { 
+                showMsg("敵Can: 2回行動"); 
+                enemyActionsRemaining = 2; 
+            }
+            if (card.name === 'Must') {
+                if(effectType === 'A') {
+                    let targets = Object.keys(pieces).filter(k => pieces[k].type === 'player' && !pieces[k].immobilized);
+                    if(targets.length > 0) {
+                        let t = targets[Math.floor(Math.random()*targets.length)];
+                        pieces[t].immobilized = true;
+                        showMsg("敵Must: プレイヤー行動不能");
+                    }
+                } else {
+                    showMsg("敵Must: 得点アップ");
+                }
+            }
+            if (card.name === 'Will') { 
+                if (effectType === 'A') {
+                    showMsg("敵Will: 妨害解除"); 
+                    for (let k in pieces) if (pieces[k].type === 'enemy') pieces[k].immobilized = false;
+                    enemyIgnoreObserve = true;
+                } else {
+                    showMsg("敵Will: 能力封印"); 
+                    blockNextTurnAbility = true; 
+                }
+            }
+            if (CARD_DATA[card.name].type === 'item') {
+                let friends = Object.keys(pieces).filter(k => pieces[k].type === 'enemy' && (!pieces[k].items || pieces[k].items.length === 0));
+                
+                if (card.name === 'With') {
+                    let withNeighbors = friends.filter(k => {
+                        const r = parseInt(k[0]), c = parseInt(k[2]);
+                        return [[1,0],[-1,0],[0,1],[0,-1]].some(([dr, dc]) => pieces[`${r+dr},${c+dc}`]?.type === 'enemy');
+                    });
+                    if (withNeighbors.length > 0) friends = withNeighbors;
+                }
+
+                if (friends.length > 0) {
+                    let targetKey = friends[Math.floor(Math.random()*friends.length)];
+                    let target = pieces[targetKey];
+                    if(!target.items) target.items = []; target.items.push(card.name); showMsg(`敵${card.name}: 装備`);
+                }
+            }
+            render();
+        }
+
+        function enemyMovePhase() {
+            let kingPos = Object.keys(pieces).find(k => pieces[k].isKing && pieces[k].type === 'enemy');
+            
+            if (kingPos && !enemyMovedPieces.has(pieces[kingPos].id)) {
+                let kr = parseInt(kingPos[0]), kc = parseInt(kingPos[2]);
+                if (!isSquareSafe(kr, kc)) { 
+                    const {moves} = getAvailableActions(kingPos);
+                    let safeMoves = moves.filter(m => {
+                        let mr = parseInt(m[0]), mc = parseInt(m[2]);
+                        return isSquareSafe(mr, mc);
+                    });
+                    
+                    if (safeMoves.length > 0) {
+                        const bestMove = safeMoves[0]; 
+                        animateMove(kingPos, bestMove, () => {
+                            pieces[bestMove] = pieces[kingPos]; delete pieces[kingPos]; lastMovedPos = bestMove;
+                            enemyMovedPieces.add(pieces[bestMove].id); enemyActionsRemaining--;
+                            tryEnemyAbilities();
+                            render(); checkEnemyNextStep();
+                        });
+                        return;
+                    }
+                }
+            }
+
+            const actionablePieces = Object.keys(pieces).filter(k => pieces[k].type === 'enemy' && !pieces[k].immobilized && !enemyMovedPieces.has(pieces[k].id));
+            let actionTaken = false; 
+
+            const attackActions = []; 
+            actionablePieces.forEach(k => { const {attacks} = getAvailableActions(k); attacks.forEach(t => attackActions.push({from:k, to:t})); });
+            
+            const safeAttackActions = attackActions.filter(a => {
+                if (pieces[a.from].isKing) return pieces[a.to].isKing;
+                return true;
+            });
+
+            if (safeAttackActions.length > 0) { 
+                const a = safeAttackActions[Math.floor(Math.random()*safeAttackActions.length)]; 
+                animateMove(a.from, a.to, () => { 
+                    const attackerId = pieces[a.from].id;
+                    if (processBattle(a.from, a.to)) return; 
+                    lastMovedPos = a.to; enemyMovedPieces.add(attackerId); enemyActionsRemaining--; 
+                    render(); checkEnemyNextStep();
+                }); 
+                return; 
+            }
+
+            let handMonsters = eHand.filter(c => CARD_DATA[c.name].type === 'monster');
+            let enemyCount = Object.values(pieces).filter(p => p.type === 'enemy').length;
+            let pCount = Object.values(pieces).filter(p => p.type === 'player').length;
+            
+            let summonProb = (enemyCount <= 3 || enemyCount < pCount) ? 0.8 : 0.4;
+            let shouldSummon = (handMonsters.length > 0 && enemyCount < 5 && Math.random() < summonProb); 
+
+            if (shouldSummon) {
+                if (trySummon()) return;
+            }
+
+            const moveActions = []; 
+            actionablePieces.forEach(k => { 
+                const {moves} = getAvailableActions(k); 
+                moves.forEach(t => {
+                    let tr = parseInt(t[0]), tc = parseInt(t[2]);
+                    if (isSquareSafe(tr, tc)) {
+                        if (pieces[k].isKing) {
+                            if (tr <= 2) moveActions.push({from:k, to:t});
+                        } else {
+                            moveActions.push({from:k, to:t}); 
+                        }
+                    }
+                }); 
+            });
+            
+            if (moveActions.length > 0) { 
+                const a = moveActions[Math.floor(Math.random()*moveActions.length)]; 
+                const moverId = pieces[a.from].id;
+                animateMove(a.from, a.to, () => { 
+                    pieces[a.to] = pieces[a.from]; delete pieces[a.from]; lastMovedPos = a.to; 
+                    enemyMovedPieces.add(moverId); enemyActionsRemaining--; 
+                    tryEnemyAbilities();
+                    render(); checkEnemyNextStep();
+                }); 
+                return; 
+            }
+
+            if (!shouldSummon && handMonsters.length > 0 && enemyCount < 5) {
+                 if (trySummon()) return;
+            }
+            
+            enemyActionsRemaining--;
+            showMsg("パス (Skip)", 1000);
+            checkEnemyNextStep();
+        }
+
+        function trySummon() {
+            if (enemyAbilityUsedThisTurn || enemySilenced) {
+                const cardIndex = eHand.findIndex(c => CARD_DATA[c.name].type === 'monster' && c.name !== 'Expand');
+                if (cardIndex === -1) return false; 
+            }
+
+            let handMonsters = eHand.filter(c => CARD_DATA[c.name].type === 'monster');
+            if (enemyAbilityUsedThisTurn || enemySilenced) {
+                handMonsters = handMonsters.filter(c => c.name !== 'Expand');
+            }
+            if (handMonsters.length === 0) return false;
+
+            let expandCount = Object.values(pieces).filter(p => p.type === 'enemy' && p.name === 'Expand' && p.abilityUsed).length;
+            
+            let cells = []; 
+            let maxR = 1 + expandCount;
+            
+            for(let r=0; r<=maxR; r++) for(let c=0; c<7; c++) if(!pieces[`${r},${c}`]) cells.push(`${r},${c}`); 
+            
+            if (cells.length > 0) { 
+                let kingPos = Object.keys(pieces).find(k => pieces[k].isKing && pieces[k].type === 'enemy');
+                if (kingPos) {
+                    let kr = parseInt(kingPos[0]), kc = parseInt(kingPos[2]);
+                    cells.sort((a, b) => {
+                        let ar = parseInt(a[0]), ac = parseInt(a[2]);
+                        let br = parseInt(b[0]), bc = parseInt(b[2]);
+                        return (Math.abs(ar-kr) + Math.abs(ac-kc)) - (Math.abs(br-kr) + Math.abs(bc-kc));
+                    });
+                }
+
+                const targetPos = cells[0];
+                const cardToUse = handMonsters[0]; 
+                const realIdx = eHand.findIndex(c => c.id === cardToUse.id);
+                if (realIdx === -1) return false;
+
+                const card = eHand.splice(realIdx, 1)[0];
+                
+                pieces[targetPos] = { ...card, type: 'enemy', isNew: true, abilityUsed: false, items: [] }; 
+                
+                if (card.name === 'Expand' && !enemySilenced && !willBlockEnemyAbility && !enemyAbilityUsedThisTurn) {
+                    pieces[targetPos].abilityUsed = true;
+                    pieces[targetPos].justActivated = true;
+                    enemyAbilityUsedThisTurn = true;
+                    showCutin('Expand', true);
+                }
+
+                lastMovedPos = targetPos; enemyActionsRemaining--; 
+                
+                render(); 
+                
+                setTimeout(checkEnemyNextStep, 500);
+                return true;
+            } 
+            return false;
+        }
+
+        function checkEnemyNextStep() {
+            if (checkGameEnd()) return;
+            if (enemyActionsRemaining > 0) { setTimeout(enemyMovePhase, 800); } else { finalizeEnemyTurn(); }
+        }
+
+        function finalizeEnemyTurn() {
+            if (checkGameEnd()) return;
+            render(); 
+            
+            turn = 'player'; hasActionUsed = false; actionsRemaining = 1; movedPieces.clear(); mustScoreEffect = false;
+            
+            for(let k in pieces) {
+                if(pieces[k].type === 'player') { 
+                    pieces[k].tempRangeBoost = 0; 
+                    if(pieces[k].name !== 'Deserve' && pieces[k].name !== 'Expand' && pieces[k].name !== 'Oppose') pieces[k].abilityUsed = false; 
+                }
+                if (pieces[k].type === 'enemy') {
+                    pieces[k].immobilized = false; 
+                    pieces[k].justActivated = false; 
+                }
+            }
+            
+            enemySilenced = false; willBlockEnemyAbility = false; enemyIgnoreObserve = false;
+
+            if (blockNextTurnAbility) { abilityUsedThisTurn = true; blockNextTurnAbility = false; showMsg("能力封印中"); } 
+            else { abilityUsedThisTurn = false; }
+            if(pDeck.length>0 && pHand.length<5) pHand.push(pDeck.shift()); 
+            render();
+        }
+
+        function showLastEnemyCard() {
+            if (!lastEnemyCardName) return;
+            previewMainName = lastEnemyCardName;
+            previewType = 'enemy';
+            previewItems = [];
+            previewIsShowingItem = false;
+            updatePreviewImage();
+            document.getElementById('preview-toggle-btn').style.display = (CARD_DATA[lastEnemyCardName].type === 'monster') ? 'block' : 'none';
+            document.getElementById('preview-overlay').style.display = 'flex';
+            toggleHelpBtn(false);
+        }
+
+        function setLongPress(el, cardName, type, items = []) { 
+            let timer; 
+            const start = () => timer = setTimeout(() => { 
+                previewMainName = cardName; previewType = type; previewItems = items || []; previewIsShowingItem = false; updatePreviewImage();
+                const btn = document.getElementById('preview-toggle-btn');
+                btn.style.display = (items && items.length > 0) ? 'block' : 'none'; btn.innerText = '前置詞を表示';
+                document.getElementById('preview-overlay').style.display = 'flex'; isPreviewing = true; 
+                toggleHelpBtn(false);
+            }, 600); 
+            const end = () => clearTimeout(timer); 
+            el.onmousedown = start; el.onmouseup = end; el.ontouchstart = start; el.ontouchend = end; 
+        }
+        function togglePreviewMode() { 
+            previewIsShowingItem = !previewIsShowingItem; 
+            updatePreviewImage(); 
+            document.getElementById('preview-toggle-btn').innerText = previewIsShowingItem ? 'モンスターを表示' : '前置詞を表示'; 
+        }
+        function updatePreviewImage() { 
+            let src = '';
+            if (previewIsShowingItem && previewItems.length > 0) {
+                src = CARD_DATA[previewItems[0]].img;
+            } else {
+                src = (previewMainName === 'KING') ? (previewType === 'player' ? CARD_DATA.KING.img_p : CARD_DATA.KING.img_e) : CARD_DATA[previewMainName].img;
+            }
+            document.getElementById('preview-img').src = src; 
+        }
+        function closePreview() { 
+            if (isOpposePreviewing) {
+                isOpposePreviewing = false;
+                document.getElementById('preview-overlay').style.display = 'none';
+                document.getElementById('counter-overlay').style.display = 'flex';
+            } else if (isPreviewing) { 
+                document.getElementById('preview-overlay').style.display = 'none'; 
+                setTimeout(()=>isPreviewing=false,100); 
+                toggleHelpBtn(true);
+            } else {
+                document.getElementById('preview-overlay').style.display = 'none';
+                toggleHelpBtn(true);
+            }
+        }
+
+        function toggleHelpBtn(show) {
+            document.getElementById('help-btn').style.display = show ? 'flex' : 'none';
+        }
+
+        function tryEnemyCounterOppose(cardName, onSuccess) {
+            const enemyOpposePos = Object.keys(pieces).find(k => 
+                pieces[k].type === 'enemy' && 
+                pieces[k].name === 'Oppose' && 
+                !pieces[k].abilityUsed
+            );
+
+            const reacts = Math.random() < 0.8;
+
+            if (enemyOpposePos && reacts) {
+                const p = pieces[enemyOpposePos];
+                
+                p.abilityUsed = true;
+                p.justActivated = true; 
+                
+                showCutin('Oppose', true); 
+                render();
+
+                setTimeout(() => {
+                    showMsg(`敵Oppose: ${cardName} を無効化！`, 2000);
+                    consumePlayerCard();
+                    enemyNextTurnAbilityBlocked = true; // 修正: 敵の次ターン能力使用禁止
+                }, 1200); 
+
+                return true; 
+            }
+
+            onSuccess();
+            return false;
+        }
+
+        function consumePlayerCard() {
+            if (selectedCardIdx !== null) {
+                pHand.splice(selectedCardIdx, 1);
+                selectedCardIdx = null;
+            }
+            selectedPos = null;
+            abilityUsedThisTurn = true;
+            abilityMode = null;
+            document.getElementById('support-options').style.display = 'none';
+            render();
+        }
+
+        function render() {
+            const boardEl = document.getElementById('board'); boardEl.innerHTML = '';
+            let pExpand = (phase === 'battle') ? Object.values(pieces).filter(p => p.type === 'player' && p.name === 'Expand' && p.abilityUsed).length : 0;
+            let eExpand = (phase === 'battle') ? Object.values(pieces).filter(p => p.type === 'enemy' && p.name === 'Expand' && p.abilityUsed).length : 0;
+            
+            const isPlayerArea = (r) => (r >= (5 - pExpand));
+            const isEnemyArea = (r) => (r <= (1 + eExpand));
+            
+            let obsP = new Set();
+            let obsE = new Set();
+            Object.keys(pieces).forEach(k => { 
+                if (pieces[k] && pieces[k].name === 'Observe' && pieces[k].abilityUsed) { 
+                    let r = parseInt(k[0]), c = parseInt(k[2]); 
+                    let zone = (pieces[k].type === 'player') ? obsP : obsE;
+                    for(let dr=-1; dr<=1; dr++) for(let dc=-1; dc<=1; dc++) { 
+                        let nr=r+dr, nc=c+dc; if(nr>=0&&nr<7&&nc>=0&&nc<7) zone.add(`${nr},${nc}`); 
+                    } 
+                } 
+            });
+            
+            for (let r = 0; r < 7; r++) {
+                for (let c = 0; c < 7; c++) {
+                    const pos = `${r},${c}`, cell = document.createElement('div');
+                    let isObserved = obsP.has(pos) || obsE.has(pos);
+                    cell.className = `cell ${isEnemyArea(r)?'enemy-area': isPlayerArea(r)?'player-area':''} ${isObserved?'observed-zone':''}`;
+                    const p = pieces[pos];
+                    if (p) {
+                        const pDiv = document.createElement('div');
+                        let sb = (p.name === 'Expand' || p.name === 'Deserve' || p.name === 'Oppose') ? p.justActivated : p.abilityUsed;
+                        let trappedInObserve = false;
+                        if (p.type === 'player' && obsE.has(pos) && !playerIgnoreObserve) trappedInObserve = true;
+                        if (p.type === 'enemy' && obsP.has(pos) && !enemyIgnoreObserve) trappedInObserve = true;
+                        let im = p.immobilized || trappedInObserve;
+                        let badge = (p.items && p.items.length > 0) ? `<div class="item-badge" title="${p.items.join(',')}">i</div>` : '';
+                        pDiv.className = `piece ${p.type} ${p.isKing?'king':''} ${sb?'ability-used-border':''} ${pos===lastMovedPos?'last-moved':''} ${pos===selectedPos?'selected':''} ${p.isNew?'spawn-anim':''} ${im?'immobilized':''}`;
+                        // 安全策: CARD_DATA[p.name]が存在するか確認
+                        const sym = CARD_DATA[p.name] ? (CARD_DATA[p.name].sym || '') : '?';
+                        pDiv.innerHTML = `<span>${p.name}</span><span style="position:absolute;top:1px;right:2px;font-size:7px;">${sym}</span>${badge}`;
+                        setLongPress(pDiv, p.name, p.type, p.items); cell.appendChild(pDiv); p.isNew = false;
+                    }
+                    if (abilityMode) { if (canSkillTarget(pos)) cell.classList.add('skill-target'); }
+                    else if (opposeSelectionMode) { if (p && p.type === 'player' && p.name === 'Oppose' && !p.abilityUsed) cell.classList.add('skill-target'); }
+                    else if (selectedPos && phase === 'battle') { const {moves, attacks} = getAvailableActions(selectedPos); if(moves.includes(pos)) cell.classList.add('movable'); if(attacks.includes(pos)) cell.classList.add('attackable'); }
+                    else if (selectedCardIdx !== null) {
+                        const card = pHand[selectedCardIdx];
+                        if (CARD_DATA[card.name].type === 'monster') {
+                            const cp = (phase === 'battle' && card.name === 'Expand' && abilityUsedThisTurn);
+                            const es = (card.name === 'Emerge' && !abilityUsedThisTurn && phase === 'battle' && r >= 2);
+                            if (!p && !cp && ((phase === 'setup' && r >= 5) || (phase === 'battle' && (isPlayerArea(r) || es)))) cell.classList.add('movable');
+                        }
+                    }
+                    cell.onclick = (e) => { e.stopPropagation(); handleCellClick(r, c); }; boardEl.appendChild(cell);
+                }
+            }
+            renderHand(); updateUI();
+        }
+
+        function handleCellClick(r, c) {
+            if (isPreviewing) return;
+            if (isAnimating) return; // アニメーション中は操作禁止
+            
+            const pos = `${r},${c}`;
+            if (opposeSelectionMode) {
+                const p = pieces[pos];
+                if (p && p.type === 'player' && p.name === 'Oppose' && !p.abilityUsed) {
+                    opposeSelectionMode = false;
+                    activateOppose(pos);
+                    window.resumeEnemyAction(true);
+                }
+                return;
+            }
+            if (abilityMode) {
+                if (!canSkillTarget(pos)) return;
+                if (selectedPos && pieces[selectedPos]) {
+                    const src = pieces[selectedPos];
+                    if (abilityMode === 'Deserve') {
+                        animateMove(selectedPos, pos, () => {
+                            const tmp = pieces[pos]; pieces[pos] = pieces[selectedPos]; pieces[selectedPos] = tmp;
+                            src.abilityUsed = true; src.justActivated = true; abilityUsedThisTurn = true; abilityMode = null; lastMovedPos = pos; selectedPos = null; showMsg("Deserve: 能力発動"); render();
+                        });
+                    } else if (abilityMode === 'Divide') {
+                        if (!abilityTargetPos) { abilityTargetPos = pos; showMsg("移動先を選択", 0); render(); }
+                        else {
+                            animateMove(abilityTargetPos, pos, () => {
+                                pieces[pos] = pieces[abilityTargetPos]; delete pieces[abilityTargetPos];
+                                src.abilityUsed = true; abilityUsedThisTurn = true; abilityMode = null; abilityTargetPos = null; lastMovedPos = pos; selectedPos = null; showMsg("Divide: 能力発動"); render();
+                            });
+                        }
+                    }
+                    return;
+                } else if (selectedCardIdx !== null) {
+                    const card = pHand[selectedCardIdx]; const target = pieces[pos];
+                    
+                    if (abilityMode === 'Can_Range') { 
+                        tryEnemyCounterOppose('Can', () => {
+                            target.tempRangeBoost = 1; 
+                            finishSupportCardUsage(`Can: ${target.name} 範囲拡大`, CARD_DATA.Can.meaningB);
+                        });
+                        return;
+                    }
+                    else if (abilityMode === 'Must_Lock') { 
+                        tryEnemyCounterOppose('Must', () => {
+                            target.immobilized = true; 
+                            finishSupportCardUsage(`Must: ${target.name} 行動不能`, CARD_DATA.Must.meaningA);
+                        });
+                        return;
+                    }
+                    else if (abilityMode === 'To' || abilityMode === 'With') { 
+                        tryEnemyCounterOppose(abilityMode, () => {
+                            if (!target.items) target.items = []; target.items.push(abilityMode); 
+                            finishSupportCardUsage(`${abilityMode} を ${target.name} に装備`, 'ーーー'); 
+                        });
+                        return;
+                    }
+                }
+            }
+            const target = pieces[pos];
+            if (target && target.type === 'player' && turn === 'player' && phase === 'battle') { selectedPos = (selectedPos === pos) ? null : pos; selectedCardIdx = null; document.getElementById('support-options').style.display = 'none'; render(); return; }
+            if (selectedPos && pieces[selectedPos] && !pieces[selectedPos].immobilized && actionsRemaining > 0 && phase === 'battle') {
+                let pObs = new Set();
+                let eObs = new Set();
+                Object.keys(pieces).forEach(k => { 
+                    if (pieces[k] && pieces[k].name === 'Observe' && pieces[k].abilityUsed) { 
+                        let r = parseInt(k[0]), c = parseInt(k[2]); 
+                        let zone = (pieces[k].type === 'player') ? pObs : eObs;
+                        for(let dr=-1; dr<=1; dr++) for(let dc=-1; dc<=1; dc++) { let nr=r+dr, nc=c+dc; if(nr>=0&&nr<7&&nc>=0&&nc<7) zone.add(`${nr},${nc}`); } 
+                    } 
+                });
+                let isObserved = (pieces[selectedPos].type === 'player' && eObs.has(selectedPos) && !playerIgnoreObserve) || (pieces[selectedPos].type === 'enemy' && pObs.has(selectedPos) && !enemyIgnoreObserve);
+                if (isObserved) { selectedPos = null; render(); return; }
+                if (movedPieces.has(pieces[selectedPos].id)) { selectedPos = null; render(); return; }
+                const {moves, attacks} = getAvailableActions(selectedPos);
+                if (attacks.includes(pos) || moves.includes(pos)) {
+                    const movingPieceId = pieces[selectedPos].id;
+                    animateMove(selectedPos, pos, () => {
+                        if (attacks.includes(pos)) { if (processBattle(selectedPos, pos)) return; } else { pieces[pos] = pieces[selectedPos]; delete pieces[selectedPos]; }
+                        lastMovedPos = pos; selectedPos = null; movedPieces.add(movingPieceId); actionsRemaining--; hasActionUsed = true; render(); 
+                        if (!checkGameEnd()) { if (actionsRemaining <= 0) setTimeout(endTurn, 1000); else showMsg(`残り行動回数: ${actionsRemaining}`); }
+                    });
+                } else { selectedPos = null; render(); }
+                return;
+            }
+            if (selectedCardIdx !== null && !target) {
+                const card = pHand[selectedCardIdx]; if (CARD_DATA[card.name].type !== 'monster') return; 
+                let expandCount = (phase === 'battle') ? Object.values(pieces).filter(p => p.type === 'player' && p.name === 'Expand' && p.abilityUsed).length : 0;
+                let currentArea = r >= (5 - expandCount); 
+                const es = (card.name === 'Emerge' && !abilityUsedThisTurn && phase === 'battle' && r >= 2);
+                let canPlace = (phase === 'setup' && r >= 5) || (phase === 'battle' && (currentArea || es));
+                if (canPlace) {
+                    let newPiece = { ...pHand.splice(selectedCardIdx, 1)[0], type: 'player', isNew: true, abilityUsed: false, justActivated: false, items: [] };
+                    if (phase === 'battle') { if (newPiece.name === 'Emerge' && !currentArea) { showCutin('Emerge'); newPiece.abilityUsed = true; abilityUsedThisTurn = true; } if (newPiece.name === 'Expand') { showCutin('Expand'); newPiece.abilityUsed = true; newPiece.justActivated = true; abilityUsedThisTurn = true; } }
+                    pieces[pos] = newPiece; lastMovedPos = pos; selectedCardIdx = null;
+                    if (phase === 'setup' && Object.keys(pieces).filter(k=>pieces[k].type==='player').length >= 5) { phase = 'battle'; setupEnemy(); showBanner("BATTLE START"); }
+                    render(); if(phase === 'battle') { hasActionUsed = true; setTimeout(endTurn, 1000); }
+                }
+            }
+        }
+
+        function executeAbility() {
+            if (selectedPos) {
+                const p = pieces[selectedPos]; showCutin(p.name);
+                setTimeout(() => { if (p.name === 'Observe') { p.abilityUsed = true; abilityUsedThisTurn = true; showMsg("Observe: 封鎖開始"); render(); } else { abilityMode = p.name; showMsg(abilityMode + "対象を選択", 0); render(); } }, 600);
+            } else if (selectedCardIdx !== null) {
+                const card = pHand[selectedCardIdx]; const data = CARD_DATA[card.name];
+                document.getElementById('ability-btn').style.display = 'none';
+                if (data.type === 'support') {
+                    const btnArea = document.getElementById('support-options'); const btnA = document.getElementById('opt-a-btn'); const btnB = document.getElementById('opt-b-btn');
+                    btnArea.style.display = 'flex'; btnA.innerText = data.descA || 'Option A'; btnB.innerText = data.descB || 'Option B';
+                } else if (data.type === 'item') { 
+                    if (Object.values(pieces).some(p => p.type === 'player' && (!p.items || p.items.length === 0))) {
+                        abilityMode = card.name; showMsg(`${card.name}: 装備対象(味方)を選択`, 0); render(); 
+                    } else { showMsg("装備可能な味方がいません", 1000); }
+                }
+            }
+        }
+
+        function handleSupportOption(optIdx) {
+            const card = pHand[selectedCardIdx]; if (!card) return;
+            
+            const executeEffect = () => {
+                if (card.name === 'Can') { 
+                    if (optIdx === 0) { actionsRemaining = 2; finishSupportCardUsage("Can: 2回行動可能", CARD_DATA.Can.meaningA); } 
+                    else { abilityMode = 'Can_Range'; showMsg("対象の味方を選択"); render(); } 
+                }
+                else if (card.name === 'Must') { 
+                    if (optIdx === 0) { abilityMode = 'Must_Lock'; showMsg("対象の敵を選択"); render(); } 
+                    else { mustScoreEffect = true; finishSupportCardUsage("Must: スコア変動適用", CARD_DATA.Must.meaningB); } 
+                }
+                else if (card.name === 'Will') { 
+                    if (optIdx === 0) { for (let k in pieces) if (pieces[k].type === 'player') pieces[k].immobilized = false; playerIgnoreObserve = true; finishSupportCardUsage("Will: 妨害解除(Observe/Must)", CARD_DATA.Will.meaningA); } 
+                    else { willBlockEnemyAbility = true; finishSupportCardUsage("Will: 次T敵能力封印", CARD_DATA.Will.meaningB); } 
+                }
+            };
+
+            const needsTargeting = (card.name === 'Can' && optIdx === 1) || (card.name === 'Must' && optIdx === 0);
+            
+            if (!needsTargeting) {
+                tryEnemyCounterOppose(card.name, executeEffect);
+            } else {
+                executeEffect(); 
+            }
+        }
+
+        function finishSupportCardUsage(msg, specificMeaning) {
+            let cardName = pHand[selectedCardIdx].name;
+            showCutin(cardName, false, specificMeaning); 
+            showMsg(msg); 
+            consumePlayerCard();
+        }
+
+        function canUseAbility(pos) { 
+            if (phase === 'setup' || abilityUsedThisTurn || turn !== 'player') return false; 
+            const p = pieces[pos]; if (!p || CARD_DATA[p.name].skill !== 'manual' || p.abilityUsed) return false;
+            if (p.name === 'Divide') { 
+                const r = parseInt(pos[0]), c = parseInt(pos[2]); 
+                return [[r-1,c],[r+1,c],[r,c-1],[r,c+1]].some(([ar,ac]) => { if (ar<0||ar>6||ac<0||ac>6) return false; let np = `${ar},${ac}`; if (np === pos || pieces[np]?.type !== 'player') return false; let er = ar + (ar-r), ec = ac + (ac-c); return (er>=0 && er<=6 && ec>=0 && ec<=6 && !pieces[`${er},${ec}`]); }); 
+            } return true; 
+        }
+        function canUseHandAbility() { 
+            if (phase === 'setup' || abilityUsedThisTurn || turn !== 'player') return false; if (selectedCardIdx === null) return false; 
+            const card = pHand[selectedCardIdx]; const type = CARD_DATA[card.name].type; 
+            if (type === 'item') { return Object.values(pieces).some(p => p.type === 'player' && (!p.items || p.items.length === 0)); }
+            return type === 'support';
+        }
+        function canSkillTarget(pos) { 
+            if (selectedCardIdx !== null) { const target = pieces[pos]; if (!target) return false; if (abilityMode === 'Can_Range') return target.type === 'player'; if (abilityMode === 'To' || abilityMode === 'With') return target.type === 'player' && (!target.items || target.items.length === 0); if (abilityMode === 'Must_Lock') return target.type === 'enemy'; return false; }
+            const sr = parseInt(selectedPos[0]), sc = parseInt(selectedPos[2]), tr = parseInt(pos[0]), tc = parseInt(pos[2]); 
+            if (abilityMode === 'Deserve') return pieces[pos]?.type === 'player' && pos !== selectedPos; 
+            if (abilityMode === 'Divide') { if (abilityTargetPos) { let ar = parseInt(abilityTargetPos[0]), ac = parseInt(abilityTargetPos[2]); return tr === ar + (ar-sr) && tc === ac + (ac-sc) && !pieces[pos]; } let er = tr + (tr-sr), ec = tc + (tc-sc); return pieces[pos]?.type === 'player' && pos !== selectedPos && Math.abs(tr-sr)+Math.abs(tc-sc)===1 && (er>=0 && er<=6 && ec>=0 && ec<=6 && !pieces[`${er},${ec}`]); }
+            return false; 
+        }
+        function getAvailableActions(pos) {
+            const p = pieces[pos]; if (!p) return {moves: [], attacks: []}; 
+            let ignoreObs = (p.type === 'player' ? playerIgnoreObserve : enemyIgnoreObserve);
+            if (!ignoreObs) {
+                for(let o in pieces) { let obs = pieces[o]; if(obs && obs.type !== p.type && obs.name === 'Observe' && obs.abilityUsed) { if (Math.abs(parseInt(o[0])-parseInt(pos[0]))<=1 && Math.abs(parseInt(o[2])-parseInt(pos[2]))<=1) return {moves:[], attacks:[]}; } }
+            }
+            if (p.immobilized) return {moves: [], attacks: []};
+            let moves = [], attacks = []; const data = CARD_DATA[p.name]; let moveBonus = 0; let atkBonus = 0;
+            if (p.tempRangeBoost) { moveBonus += 1; atkBonus += 1; }
+            if (p.items) { if (p.items.includes('To')) atkBonus += 1; if (p.items.includes('With')) { const r = parseInt(pos[0]), c = parseInt(pos[2]); let hasNeighbor = false; [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr, dc]) => { let n = pieces[`${r+dr},${c+dc}`]; if (n && n.type === p.type) hasNeighbor = true; }); if (hasNeighbor) moveBonus += 1; } }
+            const proc = (dirs, baseRange, isExtra) => { dirs.forEach(([dr, dc]) => { let maxR = baseRange + Math.max(moveBonus, atkBonus); for(let i=1; i<=maxR; i++) { let nr = parseInt(pos[0]) + (p.type==='player'?-dr*i:dr*i), nc = parseInt(pos[2]) + dc*i; if(nr<0||nr>6||nc<0||nc>6) break; let t = pieces[`${nr},${nc}`]; let canMove = (i <= baseRange + moveBonus); let canAtk = (i <= baseRange + atkBonus); if(!t) { if(canMove) moves.push(`${nr},${nc}`); } else { if(t.type!==p.type && canAtk) attacks.push(`${nr},${nc}`); break; } } }); };
+            proc(data.dirs, data.range, false); if(data.extraDirs) proc(data.extraDirs, data.extraRange, true); 
+            return {moves, attacks}; 
+        }
+        function setupEnemy() { 
+            let cells = []; for(let r=0; r<2; r++) for(let c=0; c<7; c++) if(!pieces[`${r},${c}`]) cells.push(`${r},${c}`); 
+            let count = 0; while(count < 4 && eDeck.length > 0) { 
+                let idx = eDeck.findIndex(c => CARD_DATA[c.name].type === 'monster');
+                if (idx !== -1) { let card = eDeck.splice(idx, 1)[0]; pieces[cells.splice(Math.floor(Math.random()*cells.length), 1)[0]] = { ...card, type: 'enemy', isNew: true, abilityUsed: false, items: [] }; count++; }
+            } 
+        }
+        function renderHand() { 
+            const h = document.getElementById('hand-area'); h.innerHTML = ''; 
+            const btnArea = document.getElementById('support-options'); btnArea.style.display = 'none'; 
+            let showMainBtn = false;
+            if (phase === 'battle' && turn === 'player') { if (selectedPos && canUseAbility(selectedPos)) showMainBtn = true; if (selectedCardIdx !== null && canUseHandAbility()) showMainBtn = true; }
+            document.getElementById('ability-btn').style.display = showMainBtn ? 'inline-block' : 'none';
+            pHand.forEach((c, i) => { 
+                const d = document.createElement('div'); d.className = `hand-card ${selectedCardIdx===i?'selected-card':''}`; if (c.justReturned) d.classList.add('returned-flash'); d.innerText = c.name; 
+                const data = CARD_DATA[c.name]; if (data.type === 'support' || data.type === 'item') d.style.borderColor = '#f1c40f';
+                setLongPress(d, c.name, 'player', []); d.onclick = (e) => { e.stopPropagation(); if(isPreviewing) return; selectedCardIdx = (selectedCardIdx === i) ? null : i; selectedPos = null; abilityMode = null; render(); }; 
+                h.appendChild(d); 
+            }); 
+        }
+        function updateUI() { document.getElementById('kill-p-display').innerText = kills.p; document.getElementById('kill-e-display').innerText = kills.e; document.getElementById('deck-p').innerText = pDeck.length; document.getElementById('deck-e').innerText = eDeck.length; document.getElementById('turn-display').innerText = (turn==='player'?"YOUR TURN":"ENEMY TURN"); }
+        init();
+    </script>
+</body>
+</html>
